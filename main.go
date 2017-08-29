@@ -17,6 +17,7 @@ var (
 )
 
 type ResponseMsg struct {
+	SearchAddress string
 	UrlSent string
 	Features []Feature `json:"features"`
 }
@@ -48,7 +49,7 @@ func readLines(path string) ([]string, error) {
   return lines, scanner.Err()
 }
 
-func crawl(url string, ch chan ResponseMsg) {
+func crawl(url string, searchAddress string, ch chan ResponseMsg) {
 	resp, err := http.Get(url)
 
 	if err != nil {
@@ -68,6 +69,7 @@ func crawl(url string, ch chan ResponseMsg) {
 		close(ch)
 	}
 	response.UrlSent = url
+	response.SearchAddress = searchAddress
 	ch <- response
 	return
 }
@@ -87,17 +89,44 @@ func main() {
 		seedUrls := "https://api.phila.gov/ais_ps/v1/addresses/"
 		fmt.Println("line - ", i)
 
-		addresses := strings.Split(line, ",")
+		addressRead := ""
+		unitNoRead := ""
 
-		seedUrls = seedUrls + html.EscapeString(strings.TrimSpace(addresses[0])) + "?include_units=" + strings.TrimSpace(addresses[1]) + "&opa_only="
+		addresses := strings.Split(line, ",")
+		if len(addresses) == 2 {
+			addressRead = strings.TrimSpace(addresses[0])
+			unitNoRead = strings.TrimSpace(addresses[1])
+		} else if len(addresses) == 1  {
+			addressRead = strings.TrimSpace(addresses[0])
+		}
+
+		seedUrls = seedUrls + html.EscapeString(addressRead) + "?include_units=" + unitNoRead + "&opa_only="
 		fmt.Println("Feed URL - ", seedUrls)
 
-		go crawl(seedUrls, chUrls)
+		go crawl(seedUrls, addressRead, chUrls)
   	}
 
+	fout, err := os.Create("address.out.txt")
+
+	if err != nil {
+		panic("can't write to out file")
+	}
+
+	defer fout.Close()
+
+	w := bufio.NewWriter(fout)
 	for i:=0; i < numLines; i++ {
 		msg := <- chUrls
-		fmt.Println("For - ", msg.UrlSent)
-		fmt.Println(msg.Features)
+		fmt.Fprintln(w, "For Address - "+msg.SearchAddress)
+		fmt.Fprintln(w, "API Call - "+msg.UrlSent)
+		for n, featureFound := range msg.Features{
+			fmt.Println("feature - ", n)
+			fmt.Fprintln(w, "--- Response ", n)
+			fmt.Fprintln(w, "Address - "+ featureFound.Properties.Address)
+			fmt.Fprintln(w, "Unit Number - "+ featureFound.Properties.UnitNumber)
+			fmt.Fprintln(w, "OPANumber - "+ featureFound.Properties.OPANumber)
+		}
+		fmt.Fprintln(w, "------")
 	}
+	w.Flush()
 }
